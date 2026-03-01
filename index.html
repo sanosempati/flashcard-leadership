@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Leadership Flash Cards</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <div class="shell-glow shell-glow-a" aria-hidden="true"></div>
+      <div class="shell-glow shell-glow-b" aria-hidden="true"></div>
+      <button id="sound-toggle-btn" class="sound-toggle-btn top-right-sound" type="button" aria-pressed="true">
+        Sound: On
+      </button>
+
+      <section class="hero">
+        <p class="eyebrow">One-on-One Prep Toolkit</p>
+        <h1>Leadership Prompt Deck</h1>
+        <p class="subtitle">
+          Klik tombol untuk shuffle deck, lalu pilih 1 dari 5 kartu yang dibagikan.
+          Kartu yang kamu pilih akan naik dan terbuka.
+        </p>
+
+        <div class="meta-row" aria-label="Ringkasan deck">
+          <div class="meta-pill">
+            <span class="meta-label">Deck size</span>
+            <span id="total-count" class="meta-value">50</span>
+          </div>
+          <div class="meta-pill">
+            <span class="meta-label">Cards picked</span>
+            <span id="draw-count" class="meta-value">0</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card-panel" aria-live="polite" aria-atomic="true">
+        <p id="deal-status" class="deal-status">Tekan tombol untuk shuffle deck.</p>
+
+        <div id="dealt-cards" class="dealt-cards"></div>
+      </section>
+
+      <div class="action-row">
+        <button id="random-btn" class="random-btn" type="button">
+          <span>Shuffle & Deal 5 Cards</span>
+        </button>
+        <p class="action-hint">Tip: tekan <kbd>Space</kbd> untuk deal ulang</p>
+      </div>
+    </main>
+
+    <div id="focus-overlay" class="focus-overlay" aria-hidden="true"></div>
+
+    <div id="shuffle-overlay" class="shuffle-overlay" aria-hidden="true">
+      <div id="shuffle-modal" class="shuffle-modal">
+        <div class="shuffle-deck" aria-hidden="true">
+          <div class="shuffle-card shuffle-card-1"></div>
+          <div class="shuffle-card shuffle-card-2"></div>
+          <div class="shuffle-card shuffle-card-3"></div>
+          <div class="shuffle-card shuffle-card-4"></div>
+          <div class="shuffle-card shuffle-card-5"></div>
+        </div>
+        <p class="shuffle-text">Sedang shuffle card...</p>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
