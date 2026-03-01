@@ -2,7 +2,7 @@
  * Question type:
  * { id: string, text: string, category?: string }
  */
-const questions = [
+const fallbackQuestions = [
   { id: "q1", text: "Apa keputusan paling penting tim kamu minggu ini, dan bagaimana kamu membantu memperjelas prioritasnya?", category: "alignment" },
   { id: "q2", text: "Jika anggota timmu hanya bisa menyelesaikan satu hal pekan ini, apa yang paling berdampak dan kenapa?", category: "focus" },
   { id: "q3", text: "Kapan terakhir kali kamu memberi umpan balik yang spesifik, dan apa dampaknya?", category: "feedback" },
@@ -91,8 +91,30 @@ const iconByCategory = {
 const defaultIcon =
   '<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="12" y="12" width="40" height="40" rx="12" stroke="currentColor" stroke-width="4"/><path d="M24 32H40" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>';
 
-const fanAngles = [-12, -6, 0, 6, 12];
+const EVENT_TYPES = new Set(["shuffle_start", "shuffle_done", "hand_dealt", "card_hover", "card_pick", "card_close"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CLIENT_ID_KEY = "leadership_prompt_client_id";
+const APP_CONFIG = {
+  SUPABASE_URL: window.APP_CONFIG?.SUPABASE_URL || "",
+  SUPABASE_ANON_KEY: window.APP_CONFIG?.SUPABASE_ANON_KEY || "",
+  APP_ENV: window.APP_CONFIG?.APP_ENV || "development",
+  APP_VERSION: window.APP_CONFIG?.APP_VERSION || "1.0.0"
+};
 
+const supabaseClient =
+  APP_CONFIG.SUPABASE_URL &&
+  APP_CONFIG.SUPABASE_ANON_KEY &&
+  window.supabase?.createClient
+    ? window.supabase.createClient(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      })
+    : null;
+
+const fanAngles = [-12, -6, 0, 6, 12];
 const randomBtn = document.getElementById("random-btn");
 const dealtCards = document.getElementById("dealt-cards");
 const dealStatus = document.getElementById("deal-status");
@@ -102,6 +124,7 @@ const shuffleOverlay = document.getElementById("shuffle-overlay");
 const focusOverlay = document.getElementById("focus-overlay");
 const soundToggleBtn = document.getElementById("sound-toggle-btn");
 
+let questions = [...fallbackQuestions];
 let drawCount = 0;
 let isDealing = false;
 let pickedCardId = null;
@@ -109,6 +132,142 @@ let activeCardEl = null;
 let audioCtx = null;
 let soundEnabled = true;
 let lastHoverSoundAt = 0;
+let currentSessionId = null;
+let sessionPromise = null;
+
+function getClientId() {
+  let clientId = localStorage.getItem(CLIENT_ID_KEY);
+  if (clientId) {
+    return clientId;
+  }
+
+  if (window.crypto?.randomUUID) {
+    clientId = window.crypto.randomUUID();
+  } else {
+    clientId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  localStorage.setItem(CLIENT_ID_KEY, clientId);
+  return clientId;
+}
+
+async function loadQuestionsFromDB() {
+  if (!supabaseClient) {
+    return [...fallbackQuestions];
+  }
+
+  const { data, error } = await supabaseClient
+    .from("questions")
+    .select("id,text,category,is_active,sort_order,created_at,updated_at")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.warn("[Supabase] Failed to load questions, fallback to local:", error.message);
+    return [...fallbackQuestions];
+  }
+
+  if (!data || data.length === 0) {
+    console.warn("[Supabase] Questions table empty, fallback to local.");
+    return [...fallbackQuestions];
+  }
+
+  return data.map((row) => ({ id: row.id, text: row.text, category: row.category }));
+}
+
+async function startSession(clientId) {
+  if (!supabaseClient) {
+    return null;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("game_sessions")
+    .insert({
+      client_id: clientId,
+      app_version: APP_CONFIG.APP_VERSION
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.id;
+}
+
+async function ensureSession() {
+  if (currentSessionId) {
+    return currentSessionId;
+  }
+
+  if (!supabaseClient) {
+    return null;
+  }
+
+  if (sessionPromise) {
+    return sessionPromise;
+  }
+
+  sessionPromise = startSession(getClientId())
+    .then((sessionId) => {
+      currentSessionId = sessionId;
+      return sessionId;
+    })
+    .catch((error) => {
+      console.warn("[Supabase] Failed to start session:", error.message);
+      return null;
+    })
+    .finally(() => {
+      sessionPromise = null;
+    });
+
+  return sessionPromise;
+}
+
+function normalizeQuestionId(value) {
+  if (!value || !UUID_RE.test(value)) {
+    return null;
+  }
+  return value;
+}
+
+async function logEvent(payload) {
+  if (!supabaseClient) {
+    return;
+  }
+
+  const eventType = payload?.event_type;
+  if (!EVENT_TYPES.has(eventType)) {
+    return;
+  }
+
+  const sessionId = await ensureSession();
+  if (!sessionId) {
+    return;
+  }
+
+  const data = {
+    session_id: sessionId,
+    client_id: getClientId(),
+    event_type: eventType,
+    question_id: normalizeQuestionId(payload.question_id),
+    hand_index: Number.isInteger(payload.hand_index) ? payload.hand_index : null,
+    meta_json: payload.meta_json && typeof payload.meta_json === "object" ? payload.meta_json : {}
+  };
+
+  const { error } = await supabaseClient.from("card_events").insert(data);
+  if (error) {
+    throw error;
+  }
+}
+
+function safeLogEvent(payload) {
+  logEvent(payload).catch((error) => {
+    console.warn("[Supabase] Failed to log event:", error.message);
+  });
+}
 
 function getAudioContext() {
   if (!audioCtx) {
@@ -183,7 +342,6 @@ function playDealRevealSound() {
 }
 
 function playPickSound() {
-  // Stronger "card selected" cue.
   playTone({ freq: 320, duration: 0.08, type: "square", volume: 0.026, delay: 0 });
   playTone({ freq: 523.25, duration: 0.12, type: "triangle", volume: 0.032, delay: 0.05 });
   playTone({ freq: 659.25, duration: 0.16, type: "triangle", volume: 0.03, delay: 0.12 });
@@ -232,7 +390,8 @@ function pickHand(count = 5) {
       ...question,
       palette,
       angle: fanAngles[index],
-      offset: fanOffsets[index]
+      offset: fanOffsets[index],
+      handIndex: index
     };
   });
 }
@@ -242,6 +401,7 @@ function buildCard(question, index) {
   button.type = "button";
   button.className = "deal-card";
   button.dataset.questionId = question.id;
+  button.dataset.handIndex = String(question.handIndex ?? index);
   button.style.setProperty("--angle", `${question.angle}deg`);
   button.style.setProperty("--offset", `${question.offset}px`);
   button.style.setProperty("--start", question.palette.start);
@@ -267,13 +427,26 @@ function buildCard(question, index) {
   button.addEventListener("mouseenter", () => {
     if (!pickedCardId) {
       playHoverSound();
+      safeLogEvent({
+        event_type: "card_hover",
+        question_id: question.id,
+        hand_index: Number(button.dataset.handIndex),
+        meta_json: { source: "hover" }
+      });
     }
   });
   button.addEventListener("focus", () => {
     if (!pickedCardId) {
       playHoverSound();
+      safeLogEvent({
+        event_type: "card_hover",
+        question_id: question.id,
+        hand_index: Number(button.dataset.handIndex),
+        meta_json: { source: "focus" }
+      });
     }
   });
+
   return button;
 }
 
@@ -296,6 +469,13 @@ function pickCard(cardEl, question) {
     activeCardEl = null;
     pickedCardId = null;
     dealStatus.textContent = "Kartu ditutup. Pilih kartu lain untuk membuka.";
+
+    safeLogEvent({
+      event_type: "card_close",
+      question_id: question.id,
+      hand_index: Number(cardEl.dataset.handIndex),
+      meta_json: { action: "toggle_close" }
+    });
     return;
   }
 
@@ -323,9 +503,16 @@ function pickCard(cardEl, question) {
   });
 
   dealStatus.textContent = `Kartu terpilih: ${titleCaseCategory(question.category)}. Klik kartu lagi untuk menutup, lalu pilih kartu lain.`;
+
+  safeLogEvent({
+    event_type: "card_pick",
+    question_id: question.id,
+    hand_index: Number(cardEl.dataset.handIndex),
+    meta_json: { draw_count: drawCount }
+  });
 }
 
-function startDeal() {
+async function startDeal() {
   if (isDealing) {
     return;
   }
@@ -342,6 +529,9 @@ function startDeal() {
   document.body.classList.remove("has-focus-card");
   playShuffleStartSound();
 
+  void ensureSession();
+  safeLogEvent({ event_type: "shuffle_start", meta_json: { env: APP_CONFIG.APP_ENV } });
+
   shuffleOverlay.classList.remove("fade-out");
   shuffleOverlay.classList.add("show");
 
@@ -356,21 +546,47 @@ function startDeal() {
     window.clearInterval(pulseTimer);
     shuffleOverlay.classList.remove("show", "fade-out");
     renderHand(hand);
-    // Force reflow before fade-in class for smooth transition.
     void dealtCards.offsetWidth;
     dealtCards.classList.add("show");
     playDealRevealSound();
     dealStatus.textContent = "Pilih 1 kartu untuk membukanya.";
     randomBtn.disabled = false;
     isDealing = false;
+
+    safeLogEvent({
+      event_type: "shuffle_done",
+      meta_json: { hand_size: hand.length }
+    });
+    safeLogEvent({
+      event_type: "hand_dealt",
+      meta_json: {
+        hand_size: hand.length,
+        question_ids: hand.map((q) => q.id)
+      }
+    });
   }, 1240);
 }
 
-if (totalCountEl) {
+async function bootstrapApp() {
+  randomBtn.disabled = true;
+  dealStatus.textContent = "Memuat pertanyaan...";
+
+  questions = await loadQuestionsFromDB();
   totalCountEl.textContent = String(questions.length);
+  drawCountEl.textContent = String(drawCount);
+
+  if (!supabaseClient) {
+    dealStatus.textContent = "Mode lokal aktif. Tekan tombol untuk shuffle deck.";
+  } else {
+    dealStatus.textContent = "Tekan tombol untuk shuffle deck.";
+  }
+
+  randomBtn.disabled = false;
 }
 
-randomBtn.addEventListener("click", startDeal);
+randomBtn.addEventListener("click", () => {
+  void startDeal();
+});
 
 if (soundToggleBtn) {
   soundToggleBtn.addEventListener("click", () => {
@@ -383,6 +599,8 @@ if (soundToggleBtn) {
 document.addEventListener("keydown", (event) => {
   if (event.code === "Space" && !event.repeat) {
     event.preventDefault();
-    startDeal();
+    void startDeal();
   }
 });
+
+void bootstrapApp();

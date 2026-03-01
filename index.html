@@ -69,6 +69,19 @@
       </div>
     </div>
 
+    <script src="config.js"></script>
+    <script>
+      window.APP_CONFIG = Object.assign(
+        {
+          SUPABASE_URL: "",
+          SUPABASE_ANON_KEY: "",
+          APP_ENV: "development",
+          APP_VERSION: "1.0.0"
+        },
+        window.APP_CONFIG || {}
+      );
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
   </body>
 </html>

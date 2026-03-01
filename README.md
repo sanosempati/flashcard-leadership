@@ -1,96 +1,114 @@
 # Leadership Prompt Deck
 
-PRD ringkas untuk aplikasi web interaktif flashcard leadership yang dipakai sebelum sesi One-on-One.
+Aplikasi web interaktif untuk membantu leader menyiapkan pertanyaan reflektif One-on-One dengan flow:
+- Shuffle deck
+- Deal 5 kartu tertutup
+- Pilih 1 kartu untuk dibuka (popup focus)
+- Tutup kartu dan pilih kartu lain
 
-## 1. Ringkasan Produk
-Aplikasi ini membantu leader mendapatkan pertanyaan reflektif leadership secara cepat melalui mekanisme:
-- `Shuffle` deck
-- `Deal` 5 kartu tertutup
-- Pilih 1 kartu untuk dibuka (pop-up fokus)
-- Tutup kartu dan pilih kartu lain dalam hand yang sama
+Sekarang aplikasi sudah mendukung **Supabase** untuk:
+- Source of truth bank pertanyaan (`questions`)
+- Logging interaksi anonymous (`game_sessions`, `card_events`)
+- Fallback ke data lokal jika Supabase tidak tersedia
 
-Produk berfokus pada pengalaman ringan, cepat, dan engaging (visual + audio feedback).
+## PRD Singkat (Sesuai Implementasi)
 
-## 2. Tujuan
-- Membantu leader memulai percakapan One-on-One dengan pertanyaan berkualitas.
-- Mengurangi kebuntuan saat mencari topik diskusi.
-- Memberikan pengalaman yang menyenangkan agar penggunaan berulang lebih tinggi.
+### Tujuan
+- Menyimpan pertanyaan di database agar mudah dikelola.
+- Menyimpan histori penggunaan (`shuffle`, `deal`, `hover`, `pick`, `close`).
+- Menjaga UX yang sudah ada tetap cepat dan smooth.
 
-## 3. Scope MVP
-### In Scope
-- Single-page web app (tanpa backend).
-- Bank pertanyaan statis (hardcoded).
-- Flow interaktif: shuffle -> popup animasi -> fade out -> tampil 5 kartu.
-- User dapat:
-  - memilih 1 kartu untuk membuka,
-  - menutup kartu yang terbuka,
-  - memilih kartu lain tanpa shuffle ulang.
-- Audio trigger:
-  - shuffle start,
-  - shuffle pulse,
-  - reveal hand,
-  - hover kartu,
-  - pick kartu.
-- Toggle suara `Sound: On/Off`.
+### Scope MVP
+- Frontend vanilla (`index.html`, `styles.css`, `app.js`)
+- Supabase direct dari frontend (`supabase-js`)
+- Auth mode anonymous (client id lokal, tanpa login user)
+- Raw data table untuk observability (tanpa dashboard admin)
 
 ### Out of Scope
-- Login/user account.
-- Penyimpanan histori/favorit.
-- Integrasi calendar/HRIS.
-- AI generation real-time.
-- Analytics backend.
+- Email/Google login
+- CMS admin untuk edit pertanyaan
+- Dashboard analytics internal
 
-## 4. Persona Utama
-- People manager / team leader yang rutin menjalankan One-on-One.
-- Membutuhkan prompt cepat untuk membuka diskusi bermakna.
+## Arsitektur Data
 
-## 5. User Flow
-1. User membuka halaman aplikasi.
-2. User klik `Shuffle & Deal 5 Cards`.
-3. Muncul popup animasi shuffle.
-4. Popup fade out.
-5. Muncul 5 kartu tertutup dalam layout fan.
-6. User klik 1 kartu:
-   - kartu naik ke tengah dan terbuka,
-   - kartu lain diredupkan.
-7. User klik kartu yang sama untuk menutup, lalu bisa pilih kartu lain.
-8. User bisa shuffle ulang untuk round berikutnya.
+### Tabel
+1. `questions`
+- Master pertanyaan
+- Dipakai untuk render hand 5 kartu
 
-## 6. Requirement Fungsional
-- Menampilkan total deck size.
-- Menampilkan `cards picked` counter.
-- Deal selalu menghasilkan 5 kartu dari kumpulan pertanyaan.
-- Kartu terpilih menjadi fokus (popup center) dan readable.
-- State management:
-  - belum ada kartu dipilih,
-  - kartu aktif terbuka,
-  - kartu ditutup kembali.
-- Sound toggle mengontrol semua efek audio.
+2. `game_sessions`
+- Menandai satu sesi bermain user anonymous
 
-## 7. Requirement Non-Fungsional
-- Responsive desktop + mobile.
-- Interaksi terasa smooth (animasi transisi, fade, flip, pop-up).
-- Tidak bergantung API eksternal.
-- Performa ringan (HTML/CSS/JS vanilla).
+3. `card_events`
+- Menyimpan event interaksi:
+- `shuffle_start`, `shuffle_done`, `hand_dealt`, `card_hover`, `card_pick`, `card_close`
 
-## 8. Acceptance Criteria
-- Sebelum shuffle, 5 kartu belum tampil.
-- Saat shuffle, popup animasi muncul lalu menghilang.
-- Setelah popup hilang, 5 kartu tampil dengan fade-in.
-- User bisa membuka 1 kartu, menutupnya, lalu memilih kartu lain.
-- Tombol suara berfungsi (On/Off).
-- Tampilan tetap rapi di desktop dan mobile.
+### File SQL
+- Migration: [`supabase/migrations/20260301_000001_init_leadership_prompt_deck.sql`](/Users/sanosempati/Documents/Flash Card for leader/supabase/migrations/20260301_000001_init_leadership_prompt_deck.sql)
+- Seed: [`supabase/seed/seed_questions.sql`](/Users/sanosempati/Documents/Flash Card for leader/supabase/seed/seed_questions.sql)
 
-## 9. Struktur Teknis
-- `index.html`: struktur UI, action controls, overlay shuffle.
-- `styles.css`: layout, animasi, popup, fan cards, responsive styling.
-- `app.js`: data pertanyaan, state interaksi, audio engine (Web Audio API), event handling.
+## Setup Supabase
 
-## 10. Cara Menjalankan
-1. Clone repository.
-2. Buka file `index.html` di browser.
-3. Klik `Shuffle & Deal 5 Cards` untuk mulai.
+### 1. Buat project Supabase
+- Ambil:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
 
----
+### 2. Jalankan migration SQL
+Di SQL Editor Supabase, jalankan isi file:
+- `supabase/migrations/20260301_000001_init_leadership_prompt_deck.sql`
 
-Dokumen ini mengikuti kondisi implementasi terkini pada repository.
+### 3. Seed bank pertanyaan
+Jalankan isi file:
+- `supabase/seed/seed_questions.sql`
+
+### 4. Konfigurasi frontend
+Aplikasi membaca config dari `window.APP_CONFIG`.
+
+Contoh cepat:
+1. Copy file contoh:
+```bash
+cp config.example.js config.js
+```
+2. Isi nilai `SUPABASE_URL` dan `SUPABASE_ANON_KEY` di `config.js`
+3. Load `config.js` sebelum `app.js` di `index.html` (opsional jika tidak ingin edit inline config)
+
+Default saat ini di `index.html`:
+- `window.APP_CONFIG` berisi nilai kosong
+- Jika kosong, aplikasi otomatis fallback ke data lokal
+
+## Menjalankan Aplikasi
+1. Clone repo
+2. Buka `index.html` di browser
+3. Klik `Shuffle & Deal 5 Cards`
+
+## Event Logging (Yang Dicatat)
+Saat Supabase aktif, app akan mencatat:
+- Saat shuffle dimulai
+- Saat hand 5 kartu selesai ditampilkan
+- Saat hover kartu (dengan throttle)
+- Saat pick kartu
+- Saat close kartu
+
+Catatan:
+- Logging bersifat non-blocking agar animasi UI tetap lancar.
+- Jika insert gagal, app tetap jalan normal dan hanya menulis warning di console.
+
+## Fallback Behavior
+Jika:
+- config Supabase tidak diisi,
+- koneksi gagal,
+- atau tabel `questions` kosong,
+
+maka aplikasi otomatis memakai `fallbackQuestions` di `app.js`.
+
+## Struktur File
+- [`index.html`](/Users/sanosempati/Documents/Flash Card for leader/index.html): UI structure + config bootstrap + script load
+- [`styles.css`](/Users/sanosempati/Documents/Flash Card for leader/styles.css): styling, animation, responsive layout
+- [`app.js`](/Users/sanosempati/Documents/Flash Card for leader/app.js): game flow, audio, Supabase integration, logging
+- [`config.example.js`](/Users/sanosempati/Documents/Flash Card for leader/config.example.js): template konfigurasi Supabase
+
+## Validasi Minimum Setelah Setup
+- `questions` berhasil terbaca dari Supabase (deck size sesuai data DB)
+- Event `shuffle_start` dan `card_pick` muncul di tabel `card_events`
+- Saat Supabase dimatikan, app tetap berfungsi (fallback local)
