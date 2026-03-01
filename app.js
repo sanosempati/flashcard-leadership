@@ -94,11 +94,15 @@ const defaultIcon =
 const EVENT_TYPES = new Set(["shuffle_start", "shuffle_done", "hand_dealt", "card_hover", "card_pick", "card_close"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CLIENT_ID_KEY = "leadership_prompt_client_id";
+const QUESTION_STORE_KEY = "leadership_prompt_questions_v1";
+const ADMIN_UNLOCK_KEY = "leadership_admin_unlocked";
+
 const APP_CONFIG = {
   SUPABASE_URL: window.APP_CONFIG?.SUPABASE_URL || "",
   SUPABASE_ANON_KEY: window.APP_CONFIG?.SUPABASE_ANON_KEY || "",
   APP_ENV: window.APP_CONFIG?.APP_ENV || "development",
-  APP_VERSION: window.APP_CONFIG?.APP_VERSION || "1.0.0"
+  APP_VERSION: window.APP_CONFIG?.APP_VERSION || "1.0.0",
+  ADMIN_PASSWORD: window.APP_CONFIG?.ADMIN_PASSWORD || ""
 };
 
 const supabaseClient =
@@ -123,8 +127,26 @@ const totalCountEl = document.getElementById("total-count");
 const shuffleOverlay = document.getElementById("shuffle-overlay");
 const focusOverlay = document.getElementById("focus-overlay");
 const soundToggleBtn = document.getElementById("sound-toggle-btn");
+const manageQuestionsBtn = document.getElementById("manage-questions-btn");
+const adminPasswordModal = document.getElementById("admin-password-modal");
+const adminPasswordForm = document.getElementById("admin-password-form");
+const adminPasswordInput = document.getElementById("admin-password-input");
+const adminPasswordError = document.getElementById("admin-password-error");
+const adminPasswordCancel = document.getElementById("admin-password-cancel");
+const adminPanel = document.getElementById("admin-panel");
+const adminCloseBtn = document.getElementById("admin-close-btn");
+const questionForm = document.getElementById("question-form");
+const questionIdInput = document.getElementById("question-id-input");
+const questionTextInput = document.getElementById("question-text-input");
+const questionCategoryInput = document.getElementById("question-category-input");
+const questionActiveInput = document.getElementById("question-active-input");
+const questionFormStatus = document.getElementById("question-form-status");
+const questionSubmitBtn = document.getElementById("question-submit-btn");
+const questionResetBtn = document.getElementById("question-reset-btn");
+const questionList = document.getElementById("question-list");
+const questionListCount = document.getElementById("question-list-count");
 
-let questions = [...fallbackQuestions];
+let questions = [];
 let drawCount = 0;
 let isDealing = false;
 let pickedCardId = null;
@@ -151,6 +173,87 @@ function getClientId() {
   return clientId;
 }
 
+function sanitizeCategory(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .slice(0, 40);
+
+  return normalized || "general";
+}
+
+function normalizeQuestion(record, index) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  const text = String(record.text || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  let id = String(record.id || "").trim();
+  if (!id) {
+    id = window.crypto?.randomUUID ? window.crypto.randomUUID() : `local_${Date.now()}_${index}`;
+  }
+
+  return {
+    id,
+    text,
+    category: sanitizeCategory(record.category),
+    is_active: record.is_active !== false,
+    updated_at: String(record.updated_at || new Date().toISOString())
+  };
+}
+
+function getQuestionStore() {
+  const raw = localStorage.getItem(QUESTION_STORE_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((item, index) => normalizeQuestion(item, index))
+      .filter((item) => item !== null);
+  } catch (error) {
+    console.warn("[QuestionStore] Failed to parse local store, resetting:", error.message);
+    return [];
+  }
+}
+
+function saveQuestionStore(nextQuestions) {
+  localStorage.setItem(QUESTION_STORE_KEY, JSON.stringify(nextQuestions));
+}
+
+function getActiveQuestions() {
+  return questions.filter((question) => question.is_active !== false);
+}
+
+function refreshDeckMeta() {
+  const activeCount = getActiveQuestions().length;
+  totalCountEl.textContent = String(activeCount);
+
+  if (activeCount === 0) {
+    randomBtn.disabled = true;
+    dealStatus.textContent = "Belum ada question aktif. Tambahkan question dari Manage Questions.";
+  } else if (!isDealing) {
+    randomBtn.disabled = false;
+  }
+
+  if (questionListCount) {
+    questionListCount.textContent = `${questions.length} item`;
+  }
+}
+
 async function loadQuestionsFromDB() {
   if (!supabaseClient) {
     return [...fallbackQuestions];
@@ -159,7 +262,6 @@ async function loadQuestionsFromDB() {
   const { data, error } = await supabaseClient
     .from("questions")
     .select("id,text,category,is_active,sort_order,created_at,updated_at")
-    .eq("is_active", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
 
@@ -173,7 +275,37 @@ async function loadQuestionsFromDB() {
     return [...fallbackQuestions];
   }
 
-  return data.map((row) => ({ id: row.id, text: row.text, category: row.category }));
+  return data.map((row) => ({
+    id: row.id,
+    text: row.text,
+    category: row.category,
+    is_active: row.is_active !== false,
+    updated_at: row.updated_at || row.created_at
+  }));
+}
+
+async function bootstrapQuestionStore() {
+  const localQuestions = getQuestionStore();
+  if (localQuestions.length > 0) {
+    return localQuestions;
+  }
+
+  const loaded = await loadQuestionsFromDB();
+  const normalized = loaded
+    .map((item, index) => normalizeQuestion(item, index))
+    .filter((item) => item !== null);
+
+  if (normalized.length > 0) {
+    saveQuestionStore(normalized);
+    return normalized;
+  }
+
+  const fallback = fallbackQuestions
+    .map((item, index) => normalizeQuestion(item, index))
+    .filter((item) => item !== null);
+
+  saveQuestionStore(fallback);
+  return fallback;
 }
 
 async function startSession(clientId) {
@@ -379,18 +511,24 @@ function shuffled(array) {
 }
 
 function pickHand(count = 5) {
+  const activeQuestions = getActiveQuestions();
+  if (activeQuestions.length === 0) {
+    return [];
+  }
+
+  const safeCount = Math.min(count, activeQuestions.length);
   const width = Math.min(window.innerWidth, 920);
   const spacing = width < 760 ? 72 : 112;
   const fanOffsets = [-2 * spacing, -spacing, 0, spacing, 2 * spacing];
 
-  return shuffled(questions).slice(0, count).map((question, index) => {
+  return shuffled(activeQuestions).slice(0, safeCount).map((question, index) => {
     const palette = palettes[Math.floor(Math.random() * palettes.length)];
 
     return {
       ...question,
       palette,
-      angle: fanAngles[index],
-      offset: fanOffsets[index],
+      angle: fanAngles[index] ?? 0,
+      offset: fanOffsets[index] ?? 0,
       handIndex: index
     };
   });
@@ -512,8 +650,21 @@ function pickCard(cardEl, question) {
   });
 }
 
+function closeFocusCardState() {
+  pickedCardId = null;
+  activeCardEl = null;
+  dealtCards.classList.remove("has-picked");
+  focusOverlay.classList.remove("show");
+  document.body.classList.remove("has-focus-card");
+}
+
 async function startDeal() {
-  if (isDealing) {
+  if (isDealing || adminPanel?.classList.contains("show") || adminPasswordModal?.classList.contains("show")) {
+    return;
+  }
+
+  if (getActiveQuestions().length === 0) {
+    dealStatus.textContent = "Belum ada question aktif. Tambahkan question dari Manage Questions.";
     return;
   }
 
@@ -567,21 +718,435 @@ async function startDeal() {
   }, 1240);
 }
 
+function isAdminUnlocked() {
+  return sessionStorage.getItem(ADMIN_UNLOCK_KEY) === "1";
+}
+
+function setAdminUnlocked(value) {
+  if (value) {
+    sessionStorage.setItem(ADMIN_UNLOCK_KEY, "1");
+  } else {
+    sessionStorage.removeItem(ADMIN_UNLOCK_KEY);
+  }
+}
+
+function verifyAdminPassword(input) {
+  const configuredPassword = String(APP_CONFIG.ADMIN_PASSWORD || "");
+  if (!configuredPassword) {
+    return { ok: false, message: "ADMIN_PASSWORD belum diset di APP_CONFIG." };
+  }
+
+  if (String(input || "") !== configuredPassword) {
+    return { ok: false, message: "Password salah." };
+  }
+
+  return { ok: true, message: "" };
+}
+
+function openAdminPasswordModal() {
+  if (!adminPasswordModal) {
+    return;
+  }
+  adminPasswordError.textContent = "";
+  adminPasswordInput.value = "";
+  adminPasswordModal.classList.add("show");
+  adminPasswordModal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => {
+    adminPasswordInput.focus();
+  }, 20);
+}
+
+function closeAdminPasswordModal() {
+  if (!adminPasswordModal) {
+    return;
+  }
+  adminPasswordModal.classList.remove("show");
+  adminPasswordModal.setAttribute("aria-hidden", "true");
+}
+
+function setFormModeAdd() {
+  questionIdInput.value = "";
+  questionTextInput.value = "";
+  questionCategoryInput.value = "general";
+  questionActiveInput.checked = true;
+  questionSubmitBtn.textContent = "Add Question";
+}
+
+function setFormModeEdit(question) {
+  questionIdInput.value = question.id;
+  questionTextInput.value = question.text;
+  questionCategoryInput.value = question.category || "general";
+  questionActiveInput.checked = question.is_active !== false;
+  questionSubmitBtn.textContent = "Update Question";
+}
+
+function setQuestionFormStatus(message, isError = false) {
+  if (!questionFormStatus) {
+    return;
+  }
+  questionFormStatus.textContent = message;
+  questionFormStatus.style.color = isError ? "#b91c1c" : "rgba(17, 24, 39, 0.76)";
+}
+
+function isDuplicateText(text, ignoreId = "") {
+  const target = text.trim().toLowerCase();
+  return questions.some((question) => {
+    if (ignoreId && question.id === ignoreId) {
+      return false;
+    }
+    return question.text.trim().toLowerCase() === target;
+  });
+}
+
+async function createQuestion(payload) {
+  if (!isAdminUnlocked()) {
+    return { ok: false, message: "Akses ditolak." };
+  }
+
+  const text = String(payload.text || "").trim();
+  if (text.length < 8) {
+    return { ok: false, message: "Question minimal 8 karakter." };
+  }
+
+  if (isDuplicateText(text)) {
+    return { ok: false, message: "Question yang sama sudah ada." };
+  }
+
+  const question = {
+    id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `local_${Date.now()}`,
+    text,
+    category: sanitizeCategory(payload.category),
+    is_active: payload.is_active !== false,
+    updated_at: new Date().toISOString()
+  };
+
+  if (supabaseClient) {
+    const { error } = await supabaseClient.from("questions").insert({
+      id: question.id,
+      text: question.text,
+      category: question.category,
+      is_active: question.is_active,
+      sort_order: 0
+    });
+
+    if (error) {
+      return { ok: false, message: `Gagal sync ke Supabase: ${error.message}` };
+    }
+  }
+
+  questions = [question, ...questions];
+  saveQuestionStore(questions);
+  refreshDeckMeta();
+  renderQuestionList();
+
+  if (!supabaseClient) {
+    return { ok: true, message: "Question berhasil ditambahkan (lokal, Supabase nonaktif)." };
+  }
+
+  return { ok: true, message: "Question berhasil ditambahkan & tersinkron ke Supabase." };
+}
+
+async function updateQuestion(id, payload) {
+  if (!isAdminUnlocked()) {
+    return { ok: false, message: "Akses ditolak." };
+  }
+
+  const text = String(payload.text || "").trim();
+  if (text.length < 8) {
+    return { ok: false, message: "Question minimal 8 karakter." };
+  }
+
+  if (isDuplicateText(text, id)) {
+    return { ok: false, message: "Question yang sama sudah ada." };
+  }
+
+  const index = questions.findIndex((question) => question.id === id);
+  if (index < 0) {
+    return { ok: false, message: "Question tidak ditemukan." };
+  }
+
+  const nextQuestion = {
+    ...questions[index],
+    text,
+    category: sanitizeCategory(payload.category),
+    is_active: payload.is_active !== false,
+    updated_at: new Date().toISOString()
+  };
+
+  if (supabaseClient) {
+    const { error } = await supabaseClient
+      .from("questions")
+      .update({
+        text: nextQuestion.text,
+        category: nextQuestion.category,
+        is_active: nextQuestion.is_active
+      })
+      .eq("id", id);
+
+    if (error) {
+      return { ok: false, message: `Gagal sync ke Supabase: ${error.message}` };
+    }
+  }
+
+  questions[index] = nextQuestion;
+
+  saveQuestionStore(questions);
+  refreshDeckMeta();
+  renderQuestionList();
+
+  if (!supabaseClient) {
+    return { ok: true, message: "Question berhasil diupdate (lokal, Supabase nonaktif)." };
+  }
+
+  return { ok: true, message: "Question berhasil diupdate & tersinkron ke Supabase." };
+}
+
+async function deleteQuestion(id) {
+  if (!isAdminUnlocked()) {
+    return { ok: false, message: "Akses ditolak." };
+  }
+
+  const existing = questions.find((question) => question.id === id);
+  if (!existing) {
+    return { ok: false, message: "Question tidak ditemukan." };
+  }
+
+  if (supabaseClient) {
+    const { error } = await supabaseClient.from("questions").delete().eq("id", id);
+    if (error) {
+      return { ok: false, message: `Gagal sync ke Supabase: ${error.message}` };
+    }
+  }
+
+  questions = questions.filter((question) => question.id !== id);
+  saveQuestionStore(questions);
+  refreshDeckMeta();
+  renderQuestionList();
+
+  if (!supabaseClient) {
+    return { ok: true, message: "Question berhasil dihapus (lokal, Supabase nonaktif)." };
+  }
+
+  return { ok: true, message: "Question berhasil dihapus & tersinkron ke Supabase." };
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function renderQuestionList() {
+  if (!questionList) {
+    return;
+  }
+
+  if (questions.length === 0) {
+    questionList.innerHTML = '<p class="question-empty">Belum ada question. Tambahkan dari form di atas.</p>';
+    questionListCount.textContent = "0 item";
+    return;
+  }
+
+  questionListCount.textContent = `${questions.length} item`;
+
+  questionList.innerHTML = questions
+    .map((question) => {
+      const safeText = escapeHtml(question.text);
+      const safeCategory = escapeHtml(titleCaseCategory(question.category));
+      const stateLabel = question.is_active !== false ? "Active" : "Inactive";
+
+      return `
+        <article class="question-item" data-id="${question.id}">
+          <div class="question-item-head">
+            <div class="question-item-meta">
+              <span class="question-item-category">${safeCategory}</span>
+              <span class="question-item-state">${stateLabel}</span>
+            </div>
+            <div class="question-item-actions">
+              <button class="mini-btn" type="button" data-action="edit" data-id="${question.id}">Edit</button>
+              <button class="mini-btn danger" type="button" data-action="delete" data-id="${question.id}">Delete</button>
+            </div>
+          </div>
+          <p class="question-item-text">${safeText}</p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function openAdminPanel() {
+  if (!adminPanel) {
+    return;
+  }
+  adminPanel.classList.add("show");
+  adminPanel.setAttribute("aria-hidden", "false");
+  setQuestionFormStatus("");
+  renderQuestionList();
+  setFormModeAdd();
+  questionTextInput.focus();
+}
+
+function closeAdminPanel() {
+  if (!adminPanel) {
+    return;
+  }
+  adminPanel.classList.remove("show");
+  adminPanel.setAttribute("aria-hidden", "true");
+  setQuestionFormStatus("");
+  setFormModeAdd();
+}
+
+function openManageQuestions() {
+  if (isAdminUnlocked()) {
+    openAdminPanel();
+    return;
+  }
+
+  openAdminPasswordModal();
+}
+
+function bindAdminEvents() {
+  if (!manageQuestionsBtn) {
+    return;
+  }
+
+  manageQuestionsBtn.addEventListener("click", openManageQuestions);
+
+  adminPasswordCancel?.addEventListener("click", closeAdminPasswordModal);
+
+  adminPasswordModal?.addEventListener("click", (event) => {
+    if (event.target === adminPasswordModal) {
+      closeAdminPasswordModal();
+    }
+  });
+
+  adminPasswordForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const result = verifyAdminPassword(adminPasswordInput.value);
+
+    if (!result.ok) {
+      adminPasswordError.textContent = result.message;
+      return;
+    }
+
+    setAdminUnlocked(true);
+    closeAdminPasswordModal();
+    openAdminPanel();
+  });
+
+  adminCloseBtn?.addEventListener("click", closeAdminPanel);
+
+  adminPanel?.addEventListener("click", (event) => {
+    if (event.target === adminPanel) {
+      closeAdminPanel();
+    }
+  });
+
+  questionResetBtn?.addEventListener("click", () => {
+    setFormModeAdd();
+    setQuestionFormStatus("Form direset.");
+  });
+
+  questionForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    if (!isAdminUnlocked()) {
+      setQuestionFormStatus("Akses ditolak. Unlock ulang halaman admin.", true);
+      return;
+    }
+
+    const payload = {
+      text: questionTextInput.value,
+      category: questionCategoryInput.value,
+      is_active: questionActiveInput.checked
+    };
+
+    const editingId = questionIdInput.value;
+    const result = editingId ? await updateQuestion(editingId, payload) : await createQuestion(payload);
+    setQuestionFormStatus(result.message, !result.ok);
+
+    if (result.ok) {
+      setFormModeAdd();
+      closeFocusCardState();
+      dealtCards.innerHTML = "";
+      dealtCards.classList.remove("show");
+    }
+  });
+
+  questionList?.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const action = target.dataset.action;
+    const id = target.dataset.id;
+    if (!action || !id) {
+      return;
+    }
+
+    if (!isAdminUnlocked()) {
+      setQuestionFormStatus("Akses ditolak. Unlock ulang halaman admin.", true);
+      return;
+    }
+
+    if (action === "edit") {
+      const question = questions.find((item) => item.id === id);
+      if (!question) {
+        setQuestionFormStatus("Question tidak ditemukan.", true);
+        return;
+      }
+
+      setFormModeEdit(question);
+      setQuestionFormStatus("Mode edit aktif.");
+      questionTextInput.focus();
+      return;
+    }
+
+    if (action === "delete") {
+      const ok = window.confirm("Hapus question ini?");
+      if (!ok) {
+        return;
+      }
+
+      const result = await deleteQuestion(id);
+      setQuestionFormStatus(result.message, !result.ok);
+
+      if (result.ok) {
+        setFormModeAdd();
+        closeFocusCardState();
+        dealtCards.innerHTML = "";
+        dealtCards.classList.remove("show");
+      }
+    }
+  });
+}
+
+function isTypingElement(target) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
+
 async function bootstrapApp() {
   randomBtn.disabled = true;
   dealStatus.textContent = "Memuat pertanyaan...";
 
-  questions = await loadQuestionsFromDB();
-  totalCountEl.textContent = String(questions.length);
+  questions = await bootstrapQuestionStore();
   drawCountEl.textContent = String(drawCount);
+  refreshDeckMeta();
 
-  if (!supabaseClient) {
-    dealStatus.textContent = "Mode lokal aktif. Tekan tombol untuk shuffle deck.";
-  } else {
-    dealStatus.textContent = "Tekan tombol untuk shuffle deck.";
+  if (getActiveQuestions().length > 0) {
+    if (!supabaseClient) {
+      dealStatus.textContent = "Mode lokal aktif. Tekan tombol untuk shuffle deck.";
+    } else {
+      dealStatus.textContent = "Tekan tombol untuk shuffle deck.";
+    }
   }
 
-  randomBtn.disabled = false;
+  bindAdminEvents();
+  randomBtn.disabled = getActiveQuestions().length === 0;
 }
 
 randomBtn.addEventListener("click", () => {
@@ -597,7 +1162,27 @@ if (soundToggleBtn) {
 }
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (adminPasswordModal?.classList.contains("show")) {
+      closeAdminPasswordModal();
+      return;
+    }
+
+    if (adminPanel?.classList.contains("show")) {
+      closeAdminPanel();
+      return;
+    }
+  }
+
   if (event.code === "Space" && !event.repeat) {
+    if (isTypingElement(event.target)) {
+      return;
+    }
+
+    if (adminPanel?.classList.contains("show") || adminPasswordModal?.classList.contains("show")) {
+      return;
+    }
+
     event.preventDefault();
     void startDeal();
   }

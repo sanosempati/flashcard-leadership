@@ -10,6 +10,7 @@ Sekarang aplikasi sudah mendukung **Supabase** untuk:
 - Source of truth bank pertanyaan (`questions`)
 - Logging interaksi anonymous (`game_sessions`, `card_events`)
 - Fallback ke data lokal jika Supabase tidak tersedia
+- Kelola question in-app (CRUD lokal + auto sync Supabase) dengan password gate
 
 ## PRD Singkat (Sesuai Implementasi)
 
@@ -26,7 +27,7 @@ Sekarang aplikasi sudah mendukung **Supabase** untuk:
 
 ### Out of Scope
 - Email/Google login
-- CMS admin untuk edit pertanyaan
+- CMS admin server-side
 - Dashboard analytics internal
 
 ## Arsitektur Data
@@ -45,6 +46,7 @@ Sekarang aplikasi sudah mendukung **Supabase** untuk:
 
 ### File SQL
 - Migration: [`supabase/migrations/20260301_000001_init_leadership_prompt_deck.sql`](/Users/sanosempati/Documents/Flash Card for leader/supabase/migrations/20260301_000001_init_leadership_prompt_deck.sql)
+- Policy update CRUD questions: [`supabase/migrations/20260301_000002_questions_crud_anon.sql`](/Users/sanosempati/Documents/Flash Card for leader/supabase/migrations/20260301_000002_questions_crud_anon.sql)
 - Seed: [`supabase/seed/seed_questions.sql`](/Users/sanosempati/Documents/Flash Card for leader/supabase/seed/seed_questions.sql)
 
 ## Setup Supabase
@@ -62,7 +64,11 @@ Di SQL Editor Supabase, jalankan isi file:
 Jalankan isi file:
 - `supabase/seed/seed_questions.sql`
 
-### 4. Konfigurasi frontend
+### 4. Aktifkan policy CRUD question (wajib untuk auto sync admin panel)
+Jalankan isi file:
+- `supabase/migrations/20260301_000002_questions_crud_anon.sql`
+
+### 5. Konfigurasi frontend
 Aplikasi membaca config dari `window.APP_CONFIG`.
 
 Contoh cepat:
@@ -81,6 +87,19 @@ Default saat ini di `index.html`:
 1. Clone repo
 2. Buka `index.html` di browser
 3. Klik `Shuffle & Deal 5 Cards`
+
+## Kelola Question In-App (Auto Sync Supabase)
+- Klik tombol `Manage Questions` di kanan atas.
+- Masukkan password admin (`APP_CONFIG.ADMIN_PASSWORD`).
+- Di panel admin kamu bisa add, edit, delete, dan toggle status aktif/non-aktif question.
+
+Semua perubahan tetap disimpan ke `localStorage` key `leadership_prompt_questions_v1`.
+Jika Supabase aktif, setiap add/edit/delete juga otomatis update tabel `questions`.
+
+Catatan keamanan:
+- Password ini adalah proteksi UI internal frontend (bukan auth backend).
+- Untuk ganti password, ubah `ADMIN_PASSWORD` di `config.public.js`.
+- Karena mode ini memakai `anon` policy write, gunakan hanya untuk internal MVP.
 
 ## Event Logging (Yang Dicatat)
 Saat Supabase aktif, app akan mencatat:
@@ -105,7 +124,7 @@ maka aplikasi otomatis memakai `fallbackQuestions` di `app.js`.
 ## Struktur File
 - [`index.html`](/Users/sanosempati/Documents/Flash Card for leader/index.html): UI structure + config bootstrap + script load
 - [`styles.css`](/Users/sanosempati/Documents/Flash Card for leader/styles.css): styling, animation, responsive layout
-- [`app.js`](/Users/sanosempati/Documents/Flash Card for leader/app.js): game flow, audio, Supabase integration, logging
+- [`app.js`](/Users/sanosempati/Documents/Flash Card for leader/app.js): game flow, audio, Supabase integration, local CRUD manager + password gate
 - [`config.example.js`](/Users/sanosempati/Documents/Flash Card for leader/config.example.js): template konfigurasi Supabase
 
 ## Validasi Minimum Setelah Setup

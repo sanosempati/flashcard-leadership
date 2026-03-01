@@ -19,6 +19,20 @@
       <button id="sound-toggle-btn" class="sound-toggle-btn top-right-sound" type="button" aria-pressed="true">
         Sound: On
       </button>
+      <button
+        id="manage-questions-btn"
+        class="manage-questions-btn top-right-manage"
+        type="button"
+        aria-label="Manage Questions"
+        title="Manage Questions"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25Zm17.71-10.04a1 1 0 0 0 0-1.41l-2.5-2.5a1 1 0 0 0-1.41 0l-1.96 1.96 3.75 3.75 2.12-2.09Z"
+            fill="currentColor"
+          />
+        </svg>
+      </button>
 
       <section class="hero">
         <p class="eyebrow">One-on-One Prep Toolkit</p>
@@ -69,6 +83,81 @@
       </div>
     </div>
 
+    <div id="admin-password-modal" class="admin-modal" aria-hidden="true">
+      <div class="admin-modal-card">
+        <h2>Unlock Question Manager</h2>
+        <p>Masukkan password untuk membuka halaman kelola question.</p>
+        <form id="admin-password-form" class="admin-password-form">
+          <label for="admin-password-input">Password</label>
+          <input
+            id="admin-password-input"
+            name="admin-password"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+          <p id="admin-password-error" class="admin-error" aria-live="polite"></p>
+          <div class="admin-modal-actions">
+            <button id="admin-password-cancel" class="admin-ghost-btn" type="button">Cancel</button>
+            <button class="admin-primary-btn" type="submit">Unlock</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <section id="admin-panel" class="admin-panel" aria-hidden="true">
+      <div class="admin-panel-card">
+        <div class="admin-panel-header">
+          <div>
+            <p class="admin-eyebrow">Internal Tool</p>
+            <h2>Manage Questions</h2>
+          </div>
+          <button id="admin-close-btn" class="admin-ghost-btn" type="button">Close</button>
+        </div>
+
+        <form id="question-form" class="question-form">
+          <input id="question-id-input" type="hidden" />
+
+          <div class="question-form-group">
+            <label for="question-text-input">Question Text</label>
+            <textarea id="question-text-input" rows="3" maxlength="320" required></textarea>
+          </div>
+
+          <div class="question-form-grid">
+            <div class="question-form-group">
+              <label for="question-category-input">Category</label>
+              <input
+                id="question-category-input"
+                type="text"
+                maxlength="40"
+                placeholder="contoh: coaching"
+                required
+              />
+            </div>
+            <label class="question-checkbox">
+              <input id="question-active-input" type="checkbox" checked />
+              <span>Aktif</span>
+            </label>
+          </div>
+
+          <p id="question-form-status" class="admin-status" aria-live="polite"></p>
+
+          <div class="question-form-actions">
+            <button id="question-reset-btn" class="admin-ghost-btn" type="button">Reset</button>
+            <button id="question-submit-btn" class="admin-primary-btn" type="submit">Add Question</button>
+          </div>
+        </form>
+
+        <div class="question-list-wrap">
+          <div class="question-list-head">
+            <h3>Question List</h3>
+            <span id="question-list-count">0 item</span>
+          </div>
+          <div id="question-list" class="question-list"></div>
+        </div>
+      </div>
+    </section>
+
     <script src="config.public.js"></script>
     <script>
       window.APP_CONFIG = Object.assign(
@@ -76,7 +165,8 @@
           SUPABASE_URL: "",
           SUPABASE_ANON_KEY: "",
           APP_ENV: "development",
-          APP_VERSION: "1.0.0"
+          APP_VERSION: "1.0.0",
+          ADMIN_PASSWORD: ""
         },
         window.APP_CONFIG || {}
       );
